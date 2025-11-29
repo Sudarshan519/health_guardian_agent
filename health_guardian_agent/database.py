@@ -14,14 +14,14 @@
 
 import sqlite3
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 
 
 class HealthDatabase:
     """Simple SQLite database for storing patient health data."""
 
-    def __init__(self, db_path: str = "health_guardian.db"):
+    def __init__(self, db_path: str = "sessions.db"):
         self.db_path = db_path
         self._init_db()
 
@@ -31,6 +31,8 @@ class HealthDatabase:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS patients (
                     patient_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    phone TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -58,15 +60,64 @@ class HealthDatabase:
                 )
             """)
 
+    def store_patient_info(self, patient_id: str, name: str = None, phone: str = None) -> bool:
+        """Store or update patient basic information."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                if name or phone:
+                    # Update existing patient or insert new
+                    conn.execute("""
+                        INSERT INTO patients (patient_id, name, phone)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(patient_id) DO UPDATE SET
+                            name = COALESCE(EXCLUDED.name, patients.name),
+                            phone = COALESCE(EXCLUDED.phone, patients.phone),
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (patient_id, name, phone))
+                else:
+                    # Just ensure patient exists
+                    conn.execute("""
+                        INSERT OR IGNORE INTO patients (patient_id)
+                        VALUES (?)
+                    """, (patient_id,))
+
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error storing patient info: {e}")
+            return False
+
+    def get_patient_info(self, patient_id: str) -> Dict[str, Any]:
+        """Get patient basic information."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT name, phone, created_at, updated_at
+                    FROM patients
+                    WHERE patient_id = ?
+                """, (patient_id,))
+
+                row = cursor.fetchone()
+                if row:
+                    name, phone, created_at, updated_at = row
+                    return {
+                        "patient_id": patient_id,
+                        "name": name,
+                        "phone": phone,
+                        "created_at": created_at,
+                        "updated_at": updated_at
+                    }
+                return {}
+        except Exception as e:
+            print(f"Error retrieving patient info: {e}")
+            return {}
+
     def store_patient_data(self, patient_id: str, data_type: str, data: Dict[str, Any]) -> bool:
         """Store patient health data."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Ensure patient exists
-                conn.execute("""
-                    INSERT OR IGNORE INTO patients (patient_id)
-                    VALUES (?)
-                """, (patient_id,))
+                self.store_patient_info(patient_id)
 
                 # Store the data
                 conn.execute("""
@@ -148,6 +199,35 @@ class HealthDatabase:
         except Exception as e:
             print(f"Error retrieving assessment: {e}")
             return None
+
+    def get_conversation_history(self, patient_id: str, session_id: str) -> List[tuple]:
+        """Get conversation history for a patient session."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT message_type, message_content, timestamp
+                    FROM conversations
+                    WHERE patient_id = ? AND session_id = ?
+                    ORDER BY timestamp ASC
+                """, (patient_id, session_id))
+                return cursor.fetchall()
+        except Exception as e:
+            print(f"Error retrieving conversation history: {e}")
+            return []
+
+    def store_conversation_message(self, patient_id: str, session_id: str, message_type: str, content: str) -> bool:
+        """Store a conversation message."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO conversations (patient_id, session_id, message_type, message_content)
+                    VALUES (?, ?, ?, ?)
+                """, (patient_id, session_id, message_type, content))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error storing conversation message: {e}")
+            return False
 
 
 # Global database instance

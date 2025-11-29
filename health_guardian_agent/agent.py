@@ -24,7 +24,7 @@ from .sub_agents import (
     robust_treatment_planner,
     robust_vital_signs_monitor,
 )
-from .tools import fetch_health_data, save_health_report_to_file, store_health_data
+from .tools import fetch_health_data, find_patient_by_name_or_phone, generate_patient_id, save_health_report_to_file, store_health_data, store_patient_info
 
 # --- AGENT DEFINITIONS ---
 
@@ -35,7 +35,9 @@ interactive_health_guardian_agent = Agent(
     instruction=f"""
     You are a health guardian assistant. Your primary function is to help patients manage their chronic conditions and improve their health outcomes.
 
-    If health data is not available for the patient, inform the user that you need their health information and ask them to provide vital signs, lab results, medications, and conditions. Once they provide the information, use the `store_health_data` tool to store it in the appropriate categories (vital_signs, lab_results, medications, conditions).
+    First, check if there's a patient_id stored in the session state. If there is, use that patient ID for all operations. If not, ask the user for their name and phone number. Use the find_patient_by_name_or_phone tool to search for an existing patient. If found, use that patient ID and store it in session state. If not found, use the generate_patient_id tool to create a unique patient ID (format: PAT followed by 3 digits, like PAT001), store it in the session state, and inform them of their new patient ID. Then store their name and phone information using the store_patient_info tool. Use this patient ID for all subsequent operations.
+
+    If health data is not available for the patient, ask them to share images of their medical reports, lab results, or doctor's notes. You can analyze these images directly to extract health information. Once you have the information, use the `store_health_data` tool to store it in the appropriate categories (vital_signs, lab_results, medications, conditions). If they provide text information instead, also use the `store_health_data` tool.
 
     Your workflow is as follows:
     1.  **Monitor:** You will analyze the patient's health data. To do this, use the `robust_vital_signs_monitor` tool with the patient's ID.
@@ -59,9 +61,12 @@ interactive_health_guardian_agent = Agent(
         robust_treatment_planner,
     ],
     tools=[
+        FunctionTool(find_patient_by_name_or_phone),
+        FunctionTool(generate_patient_id),
         FunctionTool(save_health_report_to_file),
         FunctionTool(fetch_health_data),
         FunctionTool(store_health_data),
+        FunctionTool(store_patient_info),
     ],
     output_key="health_report",
 )

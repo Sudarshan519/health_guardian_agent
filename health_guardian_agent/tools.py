@@ -14,7 +14,8 @@
 
 import json
 import os
-from typing import Dict, Any
+import sqlite3
+from typing import Dict, Any, Optional, Union
 
 from .database import db
 
@@ -39,8 +40,14 @@ def fetch_health_data(patient_id: str) -> dict:
         }
         return {"health_data": json.dumps(health_data, indent=2)}
     else:
-        # No data found, ask user to provide it
-        return {"health_data": "No health data found for this patient. Please provide your health information including vital signs, lab results, medications, and conditions."}
+        # No data found, ask user to provide medical images
+        return {"health_data": "No health data found for this patient. Please upload images of your medical reports, lab results, or doctor's notes, and I'll analyze them to extract your health information."}
+
+
+def store_patient_info(patient_id: str, name: str, phone: str) -> dict:
+    """Stores basic patient information."""
+    success = db.store_patient_info(patient_id, name, phone)
+    return {"status": "success" if success else "error"}
 
 
 def store_health_data(patient_id: str, data_type: str, data: Dict[str, Any]) -> dict:
@@ -53,6 +60,83 @@ def store_assessment(patient_id: str, assessment_type: str, content: str) -> dic
     """Stores assessment results in the database."""
     success = db.store_assessment(patient_id, assessment_type, content)
     return {"status": "success" if success else "error"}
+
+
+
+def generate_patient_id() -> dict:
+    """Generate a unique patient ID in format PAT001, PAT002, etc."""
+    try:
+        with sqlite3.connect(db.db_path) as conn:
+            # Get all existing patient IDs
+            cursor = conn.execute("SELECT patient_id FROM patients")
+            existing_ids = [row[0] for row in cursor.fetchall()]
+
+            # Extract numbers from PATxxx format
+            numbers = []
+            for pid in existing_ids:
+                if pid.startswith('PAT') and len(pid) == 6:
+                    try:
+                        num = int(pid[3:])
+                        numbers.append(num)
+                    except ValueError:
+                        continue
+
+            # Find next available number
+            next_num = 1
+            if numbers:
+                next_num = max(numbers) + 1
+
+            # Format as PATxxx (3 digits)
+            patient_id = f"PAT{next_num:03d}"
+
+            return {"patient_id": patient_id}
+    except Exception as e:
+        print(f"Error generating patient ID: {e}")
+        return {"patient_id": "PAT001"}  # Fallback
+
+
+def find_patient_by_name_or_phone(name: Optional[str] = None, phone: Optional[str] = None) -> dict:
+    """Find existing patient by name or phone number."""
+    try:
+        with sqlite3.connect(db.db_path) as conn:
+            if name and phone:
+                cursor = conn.execute("""
+                    SELECT patient_id, name, phone
+                    FROM patients
+                    WHERE name = ? OR phone = ?
+                """, (name, phone))
+            elif name:
+                cursor = conn.execute("""
+                    SELECT patient_id, name, phone
+                    FROM patients
+                    WHERE name = ?
+                """, (name,))
+            elif phone:
+                cursor = conn.execute("""
+                    SELECT patient_id, name, phone
+                    FROM patients
+                    WHERE phone = ?
+                """, (phone,))
+            else:
+                return {"found": False, "message": "Please provide name or phone to search"}
+
+            rows = cursor.fetchall()
+            if rows:
+                # Return the first match
+                patient_id, found_name, found_phone = rows[0]
+                return {
+                    "found": True,
+                    "patient_id": patient_id,
+                    "name": found_name,
+                    "phone": found_phone
+                }
+            else:
+                return {"found": False, "message": "No patient found with the provided information"}
+    except Exception as e:
+        print(f"Error searching for patient: {e}")
+        return {"found": False, "message": "Error occurred while searching"}
+
+
 
 
 def validate_medical_content(content: str) -> dict:
